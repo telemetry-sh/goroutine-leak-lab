@@ -1,0 +1,13 @@
+.PHONY: run test check
+
+run:
+	go run ./cmd/server
+
+test:
+	go test ./...
+
+check:
+	test -z "$$(gofmt -l .)"
+	go vet ./...
+	go test ./...
+	go test -race ./...

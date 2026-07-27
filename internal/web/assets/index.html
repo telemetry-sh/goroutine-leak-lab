@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An interactive Go lab for seeing goroutine leaks, cancellation propagation, blocked sends, and bounded worker pools through telemetry.">
+  <title>Goroutine Leak Lab · telemetry.sh</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="site-header">
+    <a class="brand" href="https://telemetry.sh" aria-label="telemetry.sh home">
+      <span class="brand-mark">t<span>/</span></span>
+      <span>telemetry<span class="brand-dot">.</span>sh</span>
+    </a>
+    <div class="header-meta">
+      <span class="live-dot"></span>
+      <span>GO RUNTIME LAB 04</span>
+      <a href="https://github.com/telemetry-sh/goroutine-leak-lab">SOURCE ↗</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><span>INCIDENT PATTERN</span> / SILENT RESOURCE LEAK</p>
+        <h1>THE REQUEST RETURNED.<br><em>THE GOROUTINE DIDN’T.</em></h1>
+        <p class="lede">Timeout metrics can look stable while abandoned workers accumulate behind them. Change the workload, compare four lifecycle strategies, and find the evidence that request telemetry alone misses.</p>
+        <div class="hero-facts">
+          <div><span class="fact-value">04</span><span class="fact-label">worker strategies</span></div>
+          <div><span class="fact-value">01</span><span class="fact-label">identical workload</span></div>
+          <div><span class="fact-value">∞</span><span class="fact-label">possible leak slope</span></div>
+        </div>
+      </div>
+      <aside class="stack-card">
+        <div class="stack-head">
+          <span>runtime/pprof</span>
+          <span class="blink">● RECORDING</span>
+        </div>
+        <pre><code><span class="muted">goroutine 8842 [chan send, 17m]:</span>
+main.fetchProfile.func1()
+  <span class="cyan">/app/profile.go:74</span> +0x127
+created by main.fetchProfile in goroutine 731
+  <span class="cyan">/app/profile.go:61</span> +0x9f
+
+<span class="coral">8842 @ 0x46cf6e 0x40713d 0x406d97</span>
+<span class="muted"># handler: already returned deadline_exceeded</span></code></pre>
+        <div class="stack-foot"><span>state: <b>CHAN SEND</b></span><span>age: <b>17M 04S</b></span></div>
+      </aside>
+    </section>
+
+    <section class="lab-shell" aria-label="Goroutine leak simulator">
+      <div class="lab-heading">
+        <div>
+          <p class="section-index">01 / LOAD PROFILE</p>
+          <h2>Shape the incident</h2>
+        </div>
+        <p>Seed <span id="seed-label">6842</span> · deterministic replay</p>
+      </div>
+
+      <div class="preset-row" role="group" aria-label="Workload presets">
+        <button class="preset active" data-preset="slow-creep"><span>01</span>SLOW CREEP</button>
+        <button class="preset" data-preset="traffic-spike"><span>02</span>TRAFFIC SPIKE</button>
+        <button class="preset" data-preset="stalled-upstream"><span>03</span>STALLED UPSTREAM</button>
+      </div>
+
+      <form id="controls" class="control-grid">
+        <label>
+          <span class="control-title">REQUEST RATE <output id="rps-output">80/s</output></span>
+          <input id="rps" type="range" min="20" max="220" step="5" value="80">
+          <span class="range-scale"><i>20/s</i><i>220/s</i></span>
+        </label>
+        <label>
+          <span class="control-title">SLOW WORK <output id="slow-output">18%</output></span>
+          <input id="slow" type="range" min="2" max="60" step="1" value="18">
+          <span class="range-scale"><i>2%</i><i>60%</i></span>
+        </label>
+        <label>
+          <span class="control-title">UPSTREAM DURATION <output id="work-output">1,600ms</output></span>
+          <input id="work" type="range" min="200" max="5000" step="100" value="1600">
+          <span class="range-scale"><i>200ms</i><i>5s</i></span>
+        </label>
+        <label>
+          <span class="control-title">REQUEST TIMEOUT <output id="timeout-output">120ms</output></span>
+          <input id="timeout" type="range" min="40" max="1000" step="20" value="120">
+          <span class="range-scale"><i>40ms</i><i>1s</i></span>
+        </label>
+        <label>
+          <span class="control-title">POOL SIZE <output id="pool-output">24</output></span>
+          <input id="pool" type="range" min="4" max="96" step="2" value="24">
+          <span class="range-scale"><i>4</i><i>96</i></span>
+        </label>
+        <label>
+          <span class="control-title">QUEUE SIZE <output id="queue-output">80</output></span>
+          <input id="queue" type="range" min="10" max="300" step="10" value="80">
+          <span class="range-scale"><i>10</i><i>300</i></span>
+        </label>
+        <button id="run-button" class="run-button" type="submit">
+          <span>RUN 90s INCIDENT</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </form>
+    </section>
+
+    <section class="results-section" aria-live="polite">
+      <div class="lab-heading">
+        <div>
+          <p class="section-index">02 / CONTROLLED COMPARISON</p>
+          <h2>Same requests. Different endings.</h2>
+        </div>
+        <div id="run-status" class="run-status"><span></span> READY</div>
+      </div>
+      <div id="strategy-grid" class="strategy-grid">
+        <div class="loading-card">Booting Go simulator…</div>
+      </div>
+    </section>
+
+    <section class="evidence-section">
+      <div class="evidence-heading">
+        <div>
+          <p class="section-index">03 / RUNTIME EVIDENCE</p>
+          <h2 id="evidence-title">Detached worker</h2>
+        </div>
+        <div id="policy-tabs" class="policy-tabs" role="tablist" aria-label="Choose strategy details"></div>
+      </div>
+
+      <div class="evidence-grid">
+        <article class="chart-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">PROCESS VIEW</span>
+              <h3>Goroutines outlive request traffic</h3>
+            </div>
+            <div class="legend"><span class="legend-goroutine">GOROUTINES</span><span class="legend-timeout">TIMEOUTS / SEC</span></div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="timeline-chart" height="280" aria-label="Goroutine and timeout timeline"></canvas>
+          </div>
+          <p id="chart-note" class="chart-note"></p>
+        </article>
+
+        <aside class="metric-panel">
+          <span class="panel-kicker">WHAT THE DASHBOARD MISSES</span>
+          <div class="metric-hero">
+            <strong id="metric-final">—</strong>
+            <span>goroutines still alive<br>at the end of the run</span>
+          </div>
+          <dl id="metric-list"></dl>
+          <div class="diagnostic">
+            <span>DIAGNOSTIC</span>
+            <p id="diagnostic-copy">Choose a strategy to inspect its runtime signature.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="telemetry-section">
+      <div class="lab-heading">
+        <div>
+          <p class="section-index">04 / CORRELATED TELEMETRY</p>
+          <h2>Make abandoned work queryable</h2>
+        </div>
+        <p>One event shape · every lifecycle decision</p>
+      </div>
+      <div class="query-box">
+        <div class="query-top"><span>TELEMETRY QUERY</span><button id="copy-query" type="button">COPY</button></div>
+        <code id="query-code">from spans | where goroutine.state == "chan send" | group by goroutine.stack_hash | count(), max(duration)</code>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>REQUEST.ID</th>
+              <th>OUTCOME</th>
+              <th>GOROUTINE.STATE</th>
+              <th>STACK.HASH</th>
+              <th>CONTEXT.CANCELED</th>
+              <th>RESULT.DELIVERY</th>
+              <th>POOL.SLOT</th>
+            </tr>
+          </thead>
+          <tbody id="event-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="lesson">
+      <p class="section-index">THE OPERATING PRINCIPLE</p>
+      <blockquote>“A timeout is a promise to the caller.<br><em>Cancellation is a command to the work.</em>”</blockquote>
+      <p>Instrument both sides of that boundary. Correlate request outcomes with worker lifecycle, runtime state, and post-timeout work to see the failure your latency graph cannot.</p>
+      <a href="https://telemetry.sh">EXPLORE WITH TELEMETRY.SH <span>↗</span></a>
+    </section>
+  </main>
+
+  <footer>
+    <span>GOROUTINE LEAK LAB · OPEN SOURCE</span>
+    <span>BUILT TO MAKE INVISIBLE WORK VISIBLE</span>
+    <a href="https://telemetry.sh">TELEMETRY.SH ↗</a>
+  </footer>
+</body>
+</html>
